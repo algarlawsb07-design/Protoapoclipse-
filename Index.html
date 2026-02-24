@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>PROTOAPOCALIPSE</title>
+<style>
+body { margin:0; overflow:hidden; background:black; font-family:Arial; }
+canvas { display:block; }
+
+#hud {
+ position:absolute;
+ top:10px;
+ left:10px;
+ color:#00ff88;
+ font-size:18px;
+}
+
+#crosshair{
+ position:absolute;
+ top:50%;
+ left:50%;
+ width:20px;
+ height:20px;
+ margin-left:-10px;
+ margin-top:-10px;
+ pointer-events:none;
+}
+#crosshair:before,#crosshair:after{
+ content:"";
+ position:absolute;
+ background:#00ff88;
+}
+#crosshair:before{
+ left:9px; top:0;
+ width:2px; height:20px;
+}
+#crosshair:after{
+ top:9px; left:0;
+ width:20px; height:2px;
+}
+
+#shootBtn,#adsBtn,#reloadBtn{
+ position:absolute;
+ bottom:40px;
+ width:70px;
+ height:70px;
+ border-radius:50%;
+ border:2px solid #00ff88;
+}
+
+#shootBtn{ right:30px; background:rgba(255,0,0,.5);}
+#adsBtn{ right:120px; background:rgba(0,0,255,.5);}
+#reloadBtn{ right:210px; background:rgba(0,255,0,.5);}
+
+#joystick{
+ position:absolute;
+ left:30px;
+ bottom:30px;
+ width:120px;
+ height:120px;
+ border:2px solid #00ff88;
+ border-radius:50%;
+}
+#stick{
+ position:absolute;
+ width:60px;
+ height:60px;
+ left:30px;
+ top:30px;
+ border-radius:50%;
+ background:rgba(0,255,136,.5);
+}
+</style>
+</head>
+<body>
+
+<div id="hud">
+Vida: <span id="hp">100</span><br>
+Munição: <span id="ammo">30</span>
+</div>
+
+<div id="crosshair"></div>
+<div id="joystick"><div id="stick"></div></div>
+<div id="shootBtn"></div>
+<div id="adsBtn"></div>
+<div id="reloadBtn"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+
+<script>
+// ===== SCENE =====
+let scene=new THREE.Scene();
+scene.background=new THREE.Color(0x050505);
+
+let camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,1000);
+let renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+document.body.appendChild(renderer.domElement);
+
+camera.position.set(0,1,0);
+
+// ===== LIGHTING =====
+let ambient=new THREE.AmbientLight(0x440000,1);
+scene.add(ambient);
+
+let light=new THREE.PointLight(0xff2200,2,20);
+light.position.set(0,5,0);
+scene.add(light);
+
+// ===== FLOOR GRID =====
+let grid=new THREE.GridHelper(20,20,0xff0000,0x330000);
+scene.add(grid);
+
+// ===== PLAYER =====
+let playerHP=100;
+let ammo=30;
+let maxAmmo=30;
+let fireRate=300;
+let lastShot=0;
+
+const hpUI=document.getElementById("hp");
+const ammoUI=document.getElementById("ammo");
+function updateHUD(){hpUI.innerText=playerHP;ammoUI.innerText=ammo;}
+
+// ===== ENEMY =====
+let enemyHP=100;
+let enemy=createEnemy();
+
+function createEnemy(){
+ let mat=new THREE.MeshStandardMaterial({color:0xff0000,emissive:0x550000});
+ let body=new THREE.Mesh(new THREE.BoxGeometry(1,1.5,1),mat);
+ body.position.set(0,0,6);
+ scene.add(body);
+ return body;
+}
+
+// ===== WEAPON MODEL (DETALHADA) =====
+let weaponGroup=new THREE.Group();
+
+let barrel=new THREE.Mesh(
+ new THREE.BoxGeometry(.2,.2,1),
+ new THREE.MeshStandardMaterial({color:0x222222,metalness:1,roughness:.3})
+);
+barrel.position.z=-.5;
+
+let body=new THREE.Mesh(
+ new THREE.BoxGeometry(.6,.3,.8),
+ new THREE.MeshStandardMaterial({color:0x111111,metalness:.8})
+);
+
+let sight=new THREE.Mesh(
+ new THREE.BoxGeometry(.1,.1,.2),
+ new THREE.MeshStandardMaterial({color:0x00ff88,emissive:0x00ff88})
+);
+sight.position.set(0,.2,-.3);
+
+weaponGroup.add(body);
+weaponGroup.add(barrel);
+weaponGroup.add(sight);
+
+weaponGroup.position.set(.6,-.5,-1);
+camera.add(weaponGroup);
+scene.add(camera);
+
+// ===== JOYSTICK =====
+let move={x:0,y:0};
+let joystick=document.getElementById("joystick");
+let stick=document.getElementById("stick");
+
+joystick.addEventListener("touchmove",e=>{
+ let r=joystick.getBoundingClientRect();
+ let t=e.touches[0];
+ let x=t.clientX-r.left-60;
+ let y=t.clientY-r.top-60;
+ let dist=Math.min(Math.sqrt(x*x+y*y),40);
+ let angle=Math.atan2(y,x);
+ move.x=Math.cos(angle)*(dist/40);
+ move.y=Math.sin(angle)*(dist/40);
+ stick.style.left=30+move.x*40+"px";
+ stick.style.top=30+move.y*40+"px";
+});
+joystick.addEventListener("touchend",()=>{
+ move.x=0;move.y=0;
+ stick.style.left="30px";
+ stick.style.top="30px";
+});
+
+// ===== SHOOT =====
+document.getElementById("shootBtn").addEventListener("touchstart",()=>{
+ let now=Date.now();
+ if(now-lastShot<fireRate||ammo<=0)return;
+ ammo--;lastShot=now;updateHUD();
+
+ // recoil anim
+ weaponGroup.position.z=-.8;
+ setTimeout(()=>weaponGroup.position.z=-1,80);
+
+ let ray=new THREE.Raycaster();
+ ray.setFromCamera(new THREE.Vector2(0,0),camera);
+ let hit=ray.intersectObject(enemy);
+ if(hit.length>0){
+  enemyHP-=25;
+  enemy.material.emissive.setHex(0xff0000);
+  setTimeout(()=>enemy.material.emissive.setHex(0x550000),100);
+  if(enemyHP<=0){
+   scene.remove(enemy);
+   setTimeout(()=>{
+    enemyHP=100;
+    enemy=createEnemy();
+   },2000);
+  }
+ }
+});
+
+// ===== RELOAD =====
+document.getElementById("reloadBtn").addEventListener("touchstart",()=>{
+ ammo=maxAmmo;updateHUD();
+});
+
+// ===== ADS =====
+document.getElementById("adsBtn").addEventListener("touchstart",()=>{
+ camera.fov=50;camera.updateProjectionMatrix();
+});
+document.getElementById("adsBtn").addEventListener("touchend",()=>{
+ camera.fov=75;camera.updateProjectionMatrix();
+});
+
+// ===== LOOP =====
+function animate(){
+ requestAnimationFrame(animate);
+
+ let speed=Math.sqrt(move.x*move.x+move.y*move.y)>0.7?.15:.08;
+
+ camera.position.x-=Math.sin(camera.rotation.y)*move.y*speed;
+ camera.position.z-=Math.cos(camera.rotation.y)*move.y*speed;
+ camera.position.x+=Math.cos(camera.rotation.y)*move.x*speed;
+ camera.position.z-=Math.sin(camera.rotation.y)*move.x*speed;
+
+ camera.position.x=Math.max(-9,Math.min(9,camera.position.x));
+ camera.position.z=Math.max(-9,Math.min(9,camera.position.z));
+
+ if(enemy){
+  enemy.position.x+=(camera.position.x-enemy.position.x)*.01;
+  enemy.position.z+=(camera.position.z-enemy.position.z)*.01;
+  let dist=enemy.position.distanceTo(camera.position);
+  if(dist<1.5){
+   playerHP-=.3;
+   if(playerHP<=0){alert("GAME OVER");location.reload();}
+   updateHUD();
+  }
+ }
+
+ renderer.render(scene,camera);
+}
+updateHUD();
+animate();
+</script>
+</body>
+</html>
