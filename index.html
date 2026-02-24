@@ -2,258 +2,208 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>PROTOAPOCALIPSE</title>
+<title>Protoapoclipse FPS</title>
 <style>
-body { margin:0; overflow:hidden; background:black; font-family:Arial; }
+body { margin:0; overflow:hidden; background:black; touch-action:none; }
 canvas { display:block; }
-
-#hud {
- position:absolute;
- top:10px;
- left:10px;
- color:#00ff88;
- font-size:18px;
+.hud {
+position:fixed;
+color:white;
+font-family:monospace;
+font-size:18px;
 }
-
-#crosshair{
- position:absolute;
- top:50%;
- left:50%;
- width:20px;
- height:20px;
- margin-left:-10px;
- margin-top:-10px;
- pointer-events:none;
+#ammo { bottom:20px; right:20px; }
+#health { bottom:20px; left:20px; }
+.button {
+position:fixed;
+width:80px;
+height:80px;
+border-radius:50%;
+background:rgba(255,255,255,0.2);
 }
-#crosshair:before,#crosshair:after{
- content:"";
- position:absolute;
- background:#00ff88;
-}
-#crosshair:before{
- left:9px; top:0;
- width:2px; height:20px;
-}
-#crosshair:after{
- top:9px; left:0;
- width:20px; height:2px;
-}
-
-#shootBtn,#adsBtn,#reloadBtn{
- position:absolute;
- bottom:40px;
- width:70px;
- height:70px;
- border-radius:50%;
- border:2px solid #00ff88;
-}
-
-#shootBtn{ right:30px; background:rgba(255,0,0,.5);}
-#adsBtn{ right:120px; background:rgba(0,0,255,.5);}
-#reloadBtn{ right:210px; background:rgba(0,255,0,.5);}
-
-#joystick{
- position:absolute;
- left:30px;
- bottom:30px;
- width:120px;
- height:120px;
- border:2px solid #00ff88;
- border-radius:50%;
-}
-#stick{
- position:absolute;
- width:60px;
- height:60px;
- left:30px;
- top:30px;
- border-radius:50%;
- background:rgba(0,255,136,.5);
-}
+#shootBtn { right:30px; bottom:120px; }
 </style>
 </head>
 <body>
 
-<div id="hud">
-Vida: <span id="hp">100</span><br>
-Munição: <span id="ammo">30</span>
-</div>
-
-<div id="crosshair"></div>
-<div id="joystick"><div id="stick"></div></div>
-<div id="shootBtn"></div>
-<div id="adsBtn"></div>
-<div id="reloadBtn"></div>
-
-<script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+<canvas id="game"></canvas>
+<div id="health" class="hud">HP: 100</div>
+<div id="ammo" class="hud">AMMO: 30</div>
+<div id="shootBtn" class="button"></div>
 
 <script>
-// ===== SCENE =====
-let scene=new THREE.Scene();
-scene.background=new THREE.Color(0x050505);
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+canvas.width = innerWidth;
+canvas.height = innerHeight;
 
-let camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,1000);
-let renderer=new THREE.WebGLRenderer({antialias:true});
-renderer.setSize(innerWidth,innerHeight);
-document.body.appendChild(renderer.domElement);
+let player = {
+x: 200,
+y: 200,
+angle: 0,
+hp: 100,
+ammo: 30,
+walkSpeed: 120,
+runSpeed: 220,
+running: false
+};
 
-camera.position.set(0,1,0);
+let enemy = {
+x: 500,
+y: 300,
+hp: 100
+};
 
-// ===== LIGHTING =====
-let ambient=new THREE.AmbientLight(0x440000,1);
-scene.add(ambient);
+let joystick = { active:false, startX:0, startY:0, dx:0, dy:0 };
 
-let light=new THREE.PointLight(0xff2200,2,20);
-light.position.set(0,5,0);
-scene.add(light);
+let lastTime = 0;
+let headBob = 0;
+let shooting = false;
 
-// ===== FLOOR GRID =====
-let grid=new THREE.GridHelper(20,20,0xff0000,0x330000);
-scene.add(grid);
+function loop(time){
+let delta = (time - lastTime)/1000;
+lastTime = time;
+update(delta);
+draw();
+requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
 
-// ===== PLAYER =====
-let playerHP=100;
-let ammo=30;
-let maxAmmo=30;
-let fireRate=300;
-let lastShot=0;
+function update(delta){
+let speed = player.running ? player.runSpeed : player.walkSpeed;
+let moveX = 0;
+let moveY = 0;
 
-const hpUI=document.getElementById("hp");
-const ammoUI=document.getElementById("ammo");
-function updateHUD(){hpUI.innerText=playerHP;ammoUI.innerText=ammo;}
+if(joystick.active){
+let len = Math.hypot(joystick.dx, joystick.dy);
+if(len > 10){
+let nx = joystick.dx / len;
+let ny = joystick.dy / len;
 
-// ===== ENEMY =====
-let enemyHP=100;
-let enemy=createEnemy();
+moveX = (Math.cos(player.angle)*-ny + Math.cos(player.angle + Math.PI/2)*nx) * speed * delta;
+moveY = (Math.sin(player.angle)*-ny + Math.sin(player.angle + Math.PI/2)*nx) * speed * delta;
 
-function createEnemy(){
- let mat=new THREE.MeshStandardMaterial({color:0xff0000,emissive:0x550000});
- let body=new THREE.Mesh(new THREE.BoxGeometry(1,1.5,1),mat);
- body.position.set(0,0,6);
- scene.add(body);
- return body;
+headBob += delta * (player.running ? 12 : 6);
+}
 }
 
-// ===== WEAPON MODEL (DETALHADA) =====
-let weaponGroup=new THREE.Group();
+player.x += moveX;
+player.y += moveY;
 
-let barrel=new THREE.Mesh(
- new THREE.BoxGeometry(.2,.2,1),
- new THREE.MeshStandardMaterial({color:0x222222,metalness:1,roughness:.3})
-);
-barrel.position.z=-.5;
+document.getElementById("health").innerText = "HP: " + player.hp;
+document.getElementById("ammo").innerText = "AMMO: " + player.ammo;
+}
 
-let body=new THREE.Mesh(
- new THREE.BoxGeometry(.6,.3,.8),
- new THREE.MeshStandardMaterial({color:0x111111,metalness:.8})
-);
+function draw(){
+ctx.fillStyle = "#111";
+ctx.fillRect(0,0,canvas.width,canvas.height);
 
-let sight=new THREE.Mesh(
- new THREE.BoxGeometry(.1,.1,.2),
- new THREE.MeshStandardMaterial({color:0x00ff88,emissive:0x00ff88})
-);
-sight.position.set(0,.2,-.3);
+// chão
+ctx.fillStyle = "#222";
+ctx.fillRect(0,canvas.height/2,canvas.width,canvas.height/2);
 
-weaponGroup.add(body);
-weaponGroup.add(barrel);
-weaponGroup.add(sight);
+// inimigo simples
+let dx = enemy.x - player.x;
+let dy = enemy.y - player.y;
+let dist = Math.hypot(dx,dy);
+let size = 8000 / dist;
+ctx.fillStyle = "red";
+ctx.fillRect(canvas.width/2 - size/2, canvas.height/2 - size/2, size, size);
 
-weaponGroup.position.set(.6,-.5,-1);
-camera.add(weaponGroup);
-scene.add(camera);
+// arma melhorada
+drawWeapon();
+}
 
-// ===== JOYSTICK =====
-let move={x:0,y:0};
-let joystick=document.getElementById("joystick");
-let stick=document.getElementById("stick");
+function drawWeapon(){
+let bob = Math.sin(headBob)*5;
+ctx.save();
+ctx.translate(canvas.width/2, canvas.height - 150 + bob);
 
-joystick.addEventListener("touchmove",e=>{
- let r=joystick.getBoundingClientRect();
- let t=e.touches[0];
- let x=t.clientX-r.left-60;
- let y=t.clientY-r.top-60;
- let dist=Math.min(Math.sqrt(x*x+y*y),40);
- let angle=Math.atan2(y,x);
- move.x=Math.cos(angle)*(dist/40);
- move.y=Math.sin(angle)*(dist/40);
- stick.style.left=30+move.x*40+"px";
- stick.style.top=30+move.y*40+"px";
-});
-joystick.addEventListener("touchend",()=>{
- move.x=0;move.y=0;
- stick.style.left="30px";
- stick.style.top="30px";
-});
+// coronha
+ctx.fillStyle="#5a3b2e";
+ctx.fillRect(-120,20,80,40);
 
-// ===== SHOOT =====
+// corpo principal
+ctx.fillStyle="#2f2f2f";
+ctx.fillRect(-50,-20,180,60);
+
+// carregador
+ctx.fillStyle="#1f1f1f";
+ctx.fillRect(10,40,30,60);
+
+// cano
+ctx.fillStyle="#444";
+ctx.fillRect(120,-10,100,20);
+
+// detalhe superior
+ctx.fillStyle="#666";
+ctx.fillRect(-30,-30,120,15);
+
+// boca do cano
+ctx.fillStyle="#999";
+ctx.fillRect(220,-5,15,10);
+
+if(shooting){
+ctx.fillStyle="yellow";
+ctx.fillRect(240,-15,40,30);
+}
+
+ctx.restore();
+}
+
 document.getElementById("shootBtn").addEventListener("touchstart",()=>{
- let now=Date.now();
- if(now-lastShot<fireRate||ammo<=0)return;
- ammo--;lastShot=now;updateHUD();
+if(player.ammo > 0){
+player.ammo--;
+shooting = true;
+setTimeout(()=>shooting=false,100);
 
- // recoil anim
- weaponGroup.position.z=-.8;
- setTimeout(()=>weaponGroup.position.z=-1,80);
-
- let ray=new THREE.Raycaster();
- ray.setFromCamera(new THREE.Vector2(0,0),camera);
- let hit=ray.intersectObject(enemy);
- if(hit.length>0){
-  enemyHP-=25;
-  enemy.material.emissive.setHex(0xff0000);
-  setTimeout(()=>enemy.material.emissive.setHex(0x550000),100);
-  if(enemyHP<=0){
-   scene.remove(enemy);
-   setTimeout(()=>{
-    enemyHP=100;
-    enemy=createEnemy();
-   },2000);
-  }
- }
-});
-
-// ===== RELOAD =====
-document.getElementById("reloadBtn").addEventListener("touchstart",()=>{
- ammo=maxAmmo;updateHUD();
-});
-
-// ===== ADS =====
-document.getElementById("adsBtn").addEventListener("touchstart",()=>{
- camera.fov=50;camera.updateProjectionMatrix();
-});
-document.getElementById("adsBtn").addEventListener("touchend",()=>{
- camera.fov=75;camera.updateProjectionMatrix();
-});
-
-// ===== LOOP =====
-function animate(){
- requestAnimationFrame(animate);
-
- let speed=Math.sqrt(move.x*move.x+move.y*move.y)>0.7?.15:.08;
-
- camera.position.x-=Math.sin(camera.rotation.y)*move.y*speed;
- camera.position.z-=Math.cos(camera.rotation.y)*move.y*speed;
- camera.position.x+=Math.cos(camera.rotation.y)*move.x*speed;
- camera.position.z-=Math.sin(camera.rotation.y)*move.x*speed;
-
- camera.position.x=Math.max(-9,Math.min(9,camera.position.x));
- camera.position.z=Math.max(-9,Math.min(9,camera.position.z));
-
- if(enemy){
-  enemy.position.x+=(camera.position.x-enemy.position.x)*.01;
-  enemy.position.z+=(camera.position.z-enemy.position.z)*.01;
-  let dist=enemy.position.distanceTo(camera.position);
-  if(dist<1.5){
-   playerHP-=.3;
-   if(playerHP<=0){alert("GAME OVER");location.reload();}
-   updateHUD();
-  }
- }
-
- renderer.render(scene,camera);
+let dx = enemy.x - player.x;
+let dy = enemy.y - player.y;
+if(Math.abs(Math.atan2(dy,dx) - player.angle) < 0.3){
+enemy.hp -= 20;
+if(enemy.hp <= 0){
+enemy.x = Math.random()*1000;
+enemy.y = Math.random()*1000;
+enemy.hp = 100;
 }
-updateHUD();
-animate();
+}
+}
+});
+
+// joystick esquerdo
+canvas.addEventListener("touchstart",(e)=>{
+let t = e.touches[0];
+if(t.clientX < canvas.width/2){
+joystick.active = true;
+joystick.startX = t.clientX;
+joystick.startY = t.clientY;
+}
+});
+
+canvas.addEventListener("touchmove",(e)=>{
+for(let t of e.touches){
+if(t.clientX < canvas.width/2 && joystick.active){
+joystick.dx = t.clientX - joystick.startX;
+joystick.dy = t.clientY - joystick.startY;
+}
+if(t.clientX > canvas.width/2){
+player.angle += (t.movementX || 0)*0.01;
+}
+}
+});
+
+canvas.addEventListener("touchend",()=>{
+joystick.active = false;
+joystick.dx = 0;
+joystick.dy = 0;
+});
+
+// câmera mouse pc
+canvas.addEventListener("mousemove",(e)=>{
+if(e.buttons===1){
+player.angle += e.movementX*0.003;
+}
+});
 </script>
 </body>
 </html>
