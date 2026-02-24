@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>HELLCORE FPS</title>
+<style>
+body { margin:0; overflow:hidden; background:black; font-family:Arial; }
+canvas { display:block; }
+
+#hud {
+ position:absolute;
+ top:10px;
+ left:10px;
+ color:white;
+ font-size:18px;
+}
+
+#shootBtn, #adsBtn {
+ position:absolute;
+ bottom:40px;
+ width:80px;
+ height:80px;
+ border-radius:50%;
+ border:2px solid white;
+}
+
+#shootBtn { right:40px; background:rgba(255,0,0,0.4); }
+#adsBtn { right:140px; background:rgba(0,0,255,0.4); }
+
+#joystick {
+ position:absolute;
+ left:40px;
+ bottom:40px;
+ width:120px;
+ height:120px;
+ border-radius:50%;
+ border:2px solid white;
+}
+
+#stick {
+ position:absolute;
+ width:60px;
+ height:60px;
+ border-radius:50%;
+ background:rgba(255,255,255,0.5);
+ left:30px;
+ top:30px;
+}
+</style>
+</head>
+<body>
+
+<div id="hud">
+Vida: <span id="hp">100</span><br>
+Munição: <span id="ammo">30</span>
+</div>
+
+<div id="joystick"><div id="stick"></div></div>
+<div id="shootBtn"></div>
+<div id="adsBtn"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+
+<script>
+let scene = new THREE.Scene();
+let camera = new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,1000);
+let renderer = new THREE.WebGLRenderer();
+renderer.setSize(innerWidth,innerHeight);
+document.body.appendChild(renderer.domElement);
+
+let playerHP = 100;
+let ammo = 30;
+
+const hpUI = document.getElementById("hp");
+const ammoUI = document.getElementById("ammo");
+
+function updateHUD(){
+ hpUI.innerText = playerHP;
+ ammoUI.innerText = ammo;
+}
+
+let light = new THREE.DirectionalLight(0xffffff,1);
+light.position.set(5,10,7);
+scene.add(light);
+
+let floor = new THREE.Mesh(
+ new THREE.BoxGeometry(20,1,20),
+ new THREE.MeshBasicMaterial({color:0x222222})
+);
+floor.position.y = -1;
+scene.add(floor);
+
+function wall(x,z,sx,sz){
+ let w = new THREE.Mesh(
+  new THREE.BoxGeometry(sx,5,sz),
+  new THREE.MeshBasicMaterial({color:0x555555})
+ );
+ w.position.set(x,1.5,z);
+ scene.add(w);
+}
+wall(0,10,20,1);
+wall(0,-10,20,1);
+wall(10,0,1,20);
+wall(-10,0,1,20);
+
+let enemyHP = 100;
+let enemy = new THREE.Mesh(
+ new THREE.BoxGeometry(1,1,1),
+ new THREE.MeshBasicMaterial({color:0xff0000})
+);
+enemy.position.set(0,0,5);
+scene.add(enemy);
+
+camera.position.y = 1;
+
+let weapon = new THREE.Mesh(
+ new THREE.BoxGeometry(0.5,0.3,1),
+ new THREE.MeshBasicMaterial({color:0x00ff00})
+);
+weapon.position.set(0.5,-0.5,-1);
+camera.add(weapon);
+scene.add(camera);
+
+let move = {x:0,y:0};
+let isADS = false;
+
+let joystick = document.getElementById("joystick");
+let stick = document.getElementById("stick");
+
+joystick.addEventListener("touchmove", e=>{
+ let rect = joystick.getBoundingClientRect();
+ let touch = e.touches[0];
+ let x = touch.clientX - rect.left - 60;
+ let y = touch.clientY - rect.top - 60;
+ let dist = Math.min(Math.sqrt(x*x+y*y),40);
+ let angle = Math.atan2(y,x);
+ move.x = Math.cos(angle)*(dist/40);
+ move.y = Math.sin(angle)*(dist/40);
+ stick.style.left = 30 + move.x*40 + "px";
+ stick.style.top = 30 + move.y*40 + "px";
+});
+
+joystick.addEventListener("touchend", ()=>{
+ move.x=0; move.y=0;
+ stick.style.left="30px";
+ stick.style.top="30px";
+});
+
+document.getElementById("shootBtn").addEventListener("touchstart",()=>{
+ if(ammo <= 0) return;
+
+ ammo--;
+ updateHUD();
+
+ weapon.position.z = -0.7;
+ setTimeout(()=>weapon.position.z=-1,100);
+
+ let ray = new THREE.Raycaster();
+ ray.setFromCamera(new THREE.Vector2(0,0),camera);
+ let hit = ray.intersectObject(enemy);
+ if(hit.length>0){
+   enemyHP -= 25;
+   if(enemyHP <= 0){
+     scene.remove(enemy);
+   }
+ }
+});
+
+document.getElementById("adsBtn").addEventListener("touchstart",()=>{
+ isADS = true;
+ camera.fov = 50;
+ camera.updateProjectionMatrix();
+});
+document.getElementById("adsBtn").addEventListener("touchend",()=>{
+ isADS = false;
+ camera.fov = 75;
+ camera.updateProjectionMatrix();
+});
+
+function animate(){
+ requestAnimationFrame(animate);
+
+ let speed = Math.sqrt(move.x*move.x+move.y*move.y) > 0.7 ? 0.15 : 0.08;
+
+ camera.position.x -= Math.sin(camera.rotation.y)*move.y*speed;
+ camera.position.z -= Math.cos(camera.rotation.y)*move.y*speed;
+ camera.position.x += Math.cos(camera.rotation.y)*move.x*speed;
+ camera.position.z -= Math.sin(camera.rotation.y)*move.x*speed;
+
+ if(enemy){
+   enemy.position.x += (camera.position.x - enemy.position.x)*0.01;
+   enemy.position.z += (camera.position.z - enemy.position.z)*0.01;
+
+   let dist = enemy.position.distanceTo(camera.position);
+   if(dist < 1.5){
+     playerHP -= 0.2;
+     if(playerHP <= 0){
+       alert("Você morreu!");
+       location.reload();
+     }
+     updateHUD();
+   }
+ }
+
+ renderer.render(scene,camera);
+}
+updateHUD();
+animate();
+</script>
+</body>
+</html>
